@@ -3,14 +3,15 @@
 import WebSocket, { WebSocketServer } from "ws";
 import dotenv from "dotenv";
 import axios from "axios";
+import FormData from "form-data";
 import { Readable } from "stream";
-import OpenAI from "openai";
+import fs from "fs";
 
 dotenv.config();
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSDxMaL";
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const PORT = process.env.PORT || 8080;
 
@@ -32,20 +33,28 @@ wss.on("connection", (ws) => {
         console.log("🛑 Stop received, processing...");
 
         const audioBuffer = Buffer.concat(audioChunks);
+        const stream = Readable.from(audioBuffer);
+
+        const formData = new FormData();
+        formData.append("file", stream, {
+          filename: "recording.webm",
+          contentType: "audio/webm",
+        });
+        formData.append("model", "whisper-1");
 
         try {
-          const transcription = await openai.audio.transcriptions.create({
-            file: {
-              value: audioBuffer,
-              options: {
-                filename: "input.webm",
-                contentType: "audio/webm"
-              }
-            },
-            model: "whisper-1"
-          });
+          const transcriptionRes = await axios.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            formData,
+            {
+              headers: {
+                Authorization: `Bearer ${OPENAI_API_KEY}`,
+                ...formData.getHeaders(),
+              },
+            }
+          );
 
-          const text = transcription.text;
+          const text = transcriptionRes.data.text;
           console.log("📃 Transcribed Text:", text);
 
           const response = await axios.post(
@@ -55,15 +64,15 @@ wss.on("connection", (ws) => {
               model_id: "eleven_multilingual_v2",
               voice_settings: {
                 stability: 0.5,
-                similarity_boost: 0.8
-              }
+                similarity_boost: 0.8,
+              },
             },
             {
               headers: {
                 "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
               },
-              responseType: "stream"
+              responseType: "stream",
             }
           );
 
@@ -71,7 +80,7 @@ wss.on("connection", (ws) => {
           response.data.on("end", () => console.log("✅ Streaming done"));
 
         } catch (err) {
-          console.error("❌ Error in processing:", err.message);
+          console.error("❌ Error:", err.message);
           ws.send(JSON.stringify({ error: err.message }));
         }
 
@@ -86,7 +95,7 @@ wss.on("connection", (ws) => {
           return;
         }
       } catch (err) {
-        console.warn("⚠️ Non-JSON message received, skipping:", err.message);
+        console.warn("⚠️ Invalid JSON received:", err.message);
       }
 
     } else {
@@ -94,7 +103,5 @@ wss.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", () => {
-    console.log("❌ Client disconnected");
-  });
+  ws.on("close", () => console.log("❌ Client disconnected"));
 });
