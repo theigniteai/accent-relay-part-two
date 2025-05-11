@@ -13,6 +13,7 @@ const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSD
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const PORT = process.env.PORT || 8080;
+
 const wss = new WebSocketServer({ port: PORT }, () => {
   console.log(`🟢 AccentRelay WebSocket Server running on ws://localhost:${PORT}`);
 });
@@ -24,65 +25,76 @@ wss.on("connection", (ws) => {
   let selectedAccent = "us";
 
   ws.on("message", async (message, isBinary) => {
-    try {
-      if (!isBinary) {
-        const data = JSON.parse(message.toString());
-        if (data.type === "start") {
-          selectedAccent = data.accent || "us";
-          return;
-        }
-      } else {
-        audioChunks.push(message);
-      }
+    if (!isBinary) {
+      const str = message.toString();
 
-      if (message.toString() === "stop") {
+      if (str === "stop") {
         console.log("🛑 Stop received, processing...");
 
         const audioBuffer = Buffer.concat(audioChunks);
 
-        const transcription = await openai.audio.transcriptions.create({
-          file: {
-            value: audioBuffer,
-            options: {
-              filename: "input.webm",
-              contentType: "audio/webm"
-            }
-          },
-          model: "whisper-1"
-        });
-
-        const text = transcription.text;
-        console.log("📃 Transcribed Text:", text);
-
-        const response = await axios.post(
-          `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream`,
-          {
-            text,
-            model_id: "eleven_multilingual_v2",
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.8
-            }
-          },
-          {
-            headers: {
-              "xi-api-key": ELEVENLABS_API_KEY,
-              "Content-Type": "application/json"
+        try {
+          const transcription = await openai.audio.transcriptions.create({
+            file: {
+              value: audioBuffer,
+              options: {
+                filename: "input.webm",
+                contentType: "audio/webm"
+              }
             },
-            responseType: "stream"
-          }
-        );
+            model: "whisper-1"
+          });
 
-        response.data.on("data", (chunk) => ws.send(chunk));
-        response.data.on("end", () => console.log("✅ Streaming done"));
+          const text = transcription.text;
+          console.log("📃 Transcribed Text:", text);
+
+          const response = await axios.post(
+            `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream`,
+            {
+              text,
+              model_id: "eleven_multilingual_v2",
+              voice_settings: {
+                stability: 0.5,
+                similarity_boost: 0.8
+              }
+            },
+            {
+              headers: {
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json"
+              },
+              responseType: "stream"
+            }
+          );
+
+          response.data.on("data", (chunk) => ws.send(chunk));
+          response.data.on("end", () => console.log("✅ Streaming done"));
+
+        } catch (err) {
+          console.error("❌ Error in processing:", err.message);
+          ws.send(JSON.stringify({ error: err.message }));
+        }
 
         audioChunks = [];
+        return;
       }
-    } catch (err) {
-      console.warn("⚠️ Error:", err.message);
-      ws.send(JSON.stringify({ error: err.message }));
+
+      try {
+        const data = JSON.parse(str);
+        if (data.type === "start") {
+          selectedAccent = data.accent || "us";
+          return;
+        }
+      } catch (err) {
+        console.warn("⚠️ Non-JSON message received, skipping:", err.message);
+      }
+
+    } else {
+      audioChunks.push(message);
     }
   });
 
-  ws.on("close", () => console.log("❌ Client disconnected"));
+  ws.on("close", () => {
+    console.log("❌ Client disconnected");
+  });
 });
