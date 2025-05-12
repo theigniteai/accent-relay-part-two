@@ -1,9 +1,9 @@
 // server.js
+
 import WebSocket, { WebSocketServer } from "ws";
 import dotenv from "dotenv";
 import axios from "axios";
 import { Readable } from "stream";
-import FormData from "form-data";
 import OpenAI from "openai";
 
 dotenv.config();
@@ -20,6 +20,7 @@ const wss = new WebSocketServer({ port: PORT }, () => {
 
 wss.on("connection", (ws) => {
   console.log("🔗 Client connected");
+
   let audioChunks = [];
   let selectedAccent = "us";
 
@@ -30,74 +31,58 @@ wss.on("connection", (ws) => {
         if (data.type === "start") {
           selectedAccent = data.accent || "us";
           return;
+        } else if (data.type === "stop") {
+          console.log("🛑 Stop received, processing...");
+
+          const audioBuffer = Buffer.concat(audioChunks);
+          const audioStream = Readable.from(audioBuffer);
+
+          // Transcribe the voice
+          const transcription = await openai.audio.transcriptions.create({
+            file: audioStream,
+            model: "whisper-1",
+          });
+
+          const text = transcription.text;
+          console.log("📃 Transcribed:", text);
+
+          // Convert to accent voice
+          const response = await axios.post(
+            `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream`,
+            {
+              text,
+              model_id: "eleven_multilingual_v2",
+              voice_settings: {
+                stability: 0.5,
+                similarity_boost: 0.8,
+              },
+            },
+            {
+              headers: {
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+              },
+              responseType: "stream",
+            }
+          );
+
+          response.data.on("data", (chunk) => ws.send(chunk));
+          response.data.on("end", () => console.log("✅ Voice playback complete"));
+
+          audioChunks = [];
+          return;
         }
       } else {
         audioChunks.push(message);
       }
     } catch (err) {
-      console.warn("⚠️ Non-JSON message received, skipping:", err.message);
-    }
-
-    if (message.toString() === "stop") {
-      console.log("🛑 Stop received, processing...");
-      const audioBuffer = Buffer.concat(audioChunks);
-      const stream = Readable.from(audioBuffer);
-
-      const formData = new FormData();
-      formData.append("file", stream, {
-        filename: "audio.wav",
-        contentType: "audio/wav",
-      });
-      formData.append("model", "whisper-1");
-
-      try {
-        const transcription = await axios.post(
-          "https://api.openai.com/v1/audio/transcriptions",
-          formData,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-              ...formData.getHeaders(),
-            },
-          }
-        );
-
-        const text = transcription.data.text;
-        console.log("📃 Transcribed Text:", text);
-
-        const response = await axios.post(
-          `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream`,
-          {
-            text,
-            model_id: "eleven_multilingual_v2",
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.8,
-            },
-          },
-          {
-            headers: {
-              "xi-api-key": ELEVENLABS_API_KEY,
-              "Content-Type": "application/json",
-            },
-            responseType: "stream",
-          }
-        );
-
-        response.data.on("data", (chunk) => ws.send(chunk));
-        response.data.on("end", () => {
-          console.log("✅ Playback complete");
-          ws.send(JSON.stringify({ status: "done" }));
-        });
-
-      } catch (err) {
-        console.error("❌ Error:", err.message);
-        ws.send(JSON.stringify({ error: err.message }));
-      }
-
-      audioChunks = [];
+      console.error("❌ JSON Error:", err.message);
+      ws.send(JSON.stringify({ error: err.message }));
     }
   });
 
-  ws.on("close", () => console.log("❌ Client disconnected"));
+  ws.on("close", () => {
+    console.log("❌ Client disconnected");
+    audioChunks = [];
+  });
 });
