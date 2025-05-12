@@ -1,10 +1,10 @@
-
+// server.js
 import WebSocket, { WebSocketServer } from "ws";
 import dotenv from "dotenv";
 import axios from "axios";
 import { Readable } from "stream";
-import OpenAI from "openai";
 import FormData from "form-data";
+import OpenAI from "openai";
 
 dotenv.config();
 
@@ -13,13 +13,13 @@ const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSD
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const PORT = process.env.PORT || 8080;
+
 const wss = new WebSocketServer({ port: PORT }, () => {
   console.log(`🟢 AccentRelay WebSocket Server running on ws://localhost:${PORT}`);
 });
 
 wss.on("connection", (ws) => {
   console.log("🔗 Client connected");
-
   let audioChunks = [];
   let selectedAccent = "us";
 
@@ -31,7 +31,6 @@ wss.on("connection", (ws) => {
           selectedAccent = data.accent || "us";
           return;
         }
-        return;
       } else {
         audioChunks.push(message);
       }
@@ -39,24 +38,31 @@ wss.on("connection", (ws) => {
       console.warn("⚠️ Non-JSON message received, skipping:", err.message);
     }
 
-    // If binary data is not received and "stop" string is received
-    if (!isBinary && message.toString() === "stop") {
+    if (message.toString() === "stop") {
       console.log("🛑 Stop received, processing...");
-
       const audioBuffer = Buffer.concat(audioChunks);
+      const stream = Readable.from(audioBuffer);
+
       const formData = new FormData();
-      formData.append("file", audioBuffer, { filename: "audio.webm", contentType: "audio/webm" });
+      formData.append("file", stream, {
+        filename: "audio.wav",
+        contentType: "audio/wav",
+      });
       formData.append("model", "whisper-1");
 
       try {
-        const whisperResponse = await axios.post("https://api.openai.com/v1/audio/transcriptions", formData, {
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            ...formData.getHeaders(),
-          },
-        });
+        const transcription = await axios.post(
+          "https://api.openai.com/v1/audio/transcriptions",
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+              ...formData.getHeaders(),
+            },
+          }
+        );
 
-        const text = whisperResponse.data.text;
+        const text = transcription.data.text;
         console.log("📃 Transcribed Text:", text);
 
         const response = await axios.post(
@@ -79,9 +85,13 @@ wss.on("connection", (ws) => {
         );
 
         response.data.on("data", (chunk) => ws.send(chunk));
-        response.data.on("end", () => console.log("✅ Streaming done"));
+        response.data.on("end", () => {
+          console.log("✅ Playback complete");
+          ws.send(JSON.stringify({ status: "done" }));
+        });
+
       } catch (err) {
-        console.error("❌ Error in processing:", err.message);
+        console.error("❌ Error:", err.message);
         ws.send(JSON.stringify({ error: err.message }));
       }
 
