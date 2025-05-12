@@ -18,7 +18,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocketServer({ port: PORT }, () => {
-  console.log(🟢 AccentRelay WebSocket Server running on ws://localhost:${PORT});
+  console.log(AccentRelay WebSocket Server running on ws://localhost:${PORT});
 });
 
 wss.on("connection", (ws) => {
