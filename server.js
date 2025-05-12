@@ -18,7 +18,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocketServer({ port: PORT }, () => {
-  console.log(AccentRelay WebSocket Server running on ws://localhost:${PORT});
+  console.log(🟢 AccentRelay WebSocket Server running on ws://localhost:${PORT});
 });
 
 wss.on("connection", (ws) => {
@@ -60,7 +60,7 @@ wss.on("connection", (ws) => {
         console.log("📃 Transcribed Text:", text);
 
         const response = await axios.post(
-          'https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream',
+          https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream,
           {
             text,
             model_id: "eleven_multilingual_v2",
