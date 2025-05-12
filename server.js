@@ -60,7 +60,7 @@ wss.on("connection", (ws) => {
         console.log("📃 Transcribed Text:", text);
 
         const response = await axios.post(
-          https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream,
+          'https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream',
           {
             text,
             model_id: "eleven_multilingual_v2",
